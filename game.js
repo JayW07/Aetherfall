@@ -25,7 +25,7 @@ const COIN_PER_KILL_MIN = 1;
 const COIN_PER_KILL_MAX = 5;
 
 // ---------------------------------------------------------------------------
-// Level definitions: 10 hand-tuned levels, each with its own look and feel.
+// Level definitions: 10 hand-tuned levels plus a final boss encounter.
 // Shard count increases every level (starting at 4) and there is no magnetic
 // pull — the player must fly directly over a shard to collect it. Enemy
 // speed/health/spawn rate ramp up steadily for a difficulty climb toward the
@@ -33,54 +33,59 @@ const COIN_PER_KILL_MAX = 5;
 // ---------------------------------------------------------------------------
 const LEVELS = [
   {
-    name: 'Level 1: Skyfall Meadows', shards: 4, spawnBase: 2.0, spawnMin: 1.05,
+    name: 'Level 1: The Shipyard Docks', shards: 4, spawnBase: 2.0, spawnMin: 1.05,
     enemySpeed: 34, enemyHp: 1.6, stormSpeed: 0.04,
     skyTop: [110, 130, 200], skyBottom: [10, 14, 30], accent: '#77d7ff',
   },
   {
-    name: 'Level 2: Whispering Cliffs', shards: 5, spawnBase: 1.75, spawnMin: 0.92,
+    name: 'Level 2: The Grassy Plains', shards: 5, spawnBase: 1.75, spawnMin: 0.92,
     enemySpeed: 44, enemyHp: 2.1, stormSpeed: 0.055,
     skyTop: [95, 140, 190], skyBottom: [10, 16, 34], accent: '#8fe3d8',
   },
   {
-    name: 'Level 3: Glasswind Terraces', shards: 6, spawnBase: 1.5, spawnMin: 0.8,
+    name: 'Level 3: Lanternwatch Village', shards: 6, spawnBase: 1.5, spawnMin: 0.8,
     enemySpeed: 52, enemyHp: 2.7, stormSpeed: 0.07,
     skyTop: [120, 110, 210], skyBottom: [12, 12, 32], accent: '#be7cff',
   },
   {
-    name: 'Level 4: Amber Reach', shards: 7, spawnBase: 1.25, spawnMin: 0.66,
+    name: 'Level 4: The Whispering Forest', shards: 7, spawnBase: 1.25, spawnMin: 0.66,
     enemySpeed: 62, enemyHp: 3.4, stormSpeed: 0.085,
     skyTop: [190, 140, 90], skyBottom: [30, 16, 12], accent: '#ffb56b',
   },
   {
-    name: 'Level 5: Emberfall Ridge', shards: 8, spawnBase: 1.05, spawnMin: 0.56,
+    name: 'Level 5: The Embercrown Cave', shards: 8, spawnBase: 1.05, spawnMin: 0.56,
     enemySpeed: 72, enemyHp: 4.2, stormSpeed: 0.1,
     skyTop: [200, 90, 70], skyBottom: [32, 10, 14], accent: '#ff7a59',
   },
   {
-    name: 'Level 6: Stormglass Expanse', shards: 9, spawnBase: 0.9, spawnMin: 0.48,
+    name: 'Level 6: Deepstone Caverns', shards: 9, spawnBase: 0.9, spawnMin: 0.48,
     enemySpeed: 84, enemyHp: 5.1, stormSpeed: 0.12,
     skyTop: [80, 100, 210], skyBottom: [8, 10, 30], accent: '#77aaff',
   },
   {
-    name: 'Level 7: Wraithlight Hollow', shards: 10, spawnBase: 0.76, spawnMin: 0.4,
+    name: 'Level 7: The Cave Mouth', shards: 10, spawnBase: 0.76, spawnMin: 0.4,
     enemySpeed: 96, enemyHp: 6.1, stormSpeed: 0.14,
     skyTop: [70, 60, 120], skyBottom: [6, 6, 18], accent: '#c58cff',
   },
   {
-    name: 'Level 8: The Hollow Vault', shards: 11, spawnBase: 0.63, spawnMin: 0.33,
+    name: 'Level 8: Mountainclimb Path', shards: 11, spawnBase: 0.63, spawnMin: 0.33,
     enemySpeed: 110, enemyHp: 7.3, stormSpeed: 0.16,
     skyTop: [60, 50, 90], skyBottom: [5, 5, 14], accent: '#ff8fd0',
   },
   {
-    name: 'Level 9: Ashen Spire Approach', shards: 12, spawnBase: 0.5, spawnMin: 0.26,
+    name: 'Level 9: The Snowline Path', shards: 12, spawnBase: 0.5, spawnMin: 0.26,
     enemySpeed: 126, enemyHp: 8.7, stormSpeed: 0.185,
     skyTop: [140, 40, 40], skyBottom: [20, 4, 6], accent: '#ff5c5c',
   },
   {
-    name: 'Level 10: The Ashen Regent\'s Bastion', shards: 13, spawnBase: 0.38, spawnMin: 0.2,
+    name: 'Level 10: Volcano Summit', shards: 13, spawnBase: 0.38, spawnMin: 0.2,
     enemySpeed: 144, enemyHp: 10.5, stormSpeed: 0.22,
     skyTop: [40, 10, 10], skyBottom: [4, 2, 6], accent: '#ffdc7a',
+  },
+  {
+    name: 'Level 11: The Lava Trial Chamber', shards: 0, spawnBase: Infinity, spawnMin: Infinity,
+    enemySpeed: 52, enemyHp: 240, stormSpeed: 0.28, isBoss: true,
+    skyTop: [18, 55, 90], skyBottom: [3, 5, 18], accent: '#9fe7ff',
   },
 ];
 
@@ -129,6 +134,7 @@ let droneProjectiles = [];
 let enemies = [];
 let shards = [];
 let player = null;
+let bossSpawned = false;
 
 const upgrades = {
   health: 0,
@@ -213,6 +219,7 @@ function startLevel(index, preserveHpRatio) {
   projectiles = [];
   droneProjectiles = [];
   enemies = [];
+  bossSpawned = false;
   shards = buildShardsForLevel();
   player = initPlayer(preserveHpRatio);
 
@@ -241,7 +248,12 @@ function retryLevel() {
 function updateHud() {
   hpText.textContent = `${Math.max(0, Math.ceil(player.hp))} / ${player.maxHp}`;
   const collected = shards.filter((s) => s.collected).length;
-  shardText.textContent = `${collected} / ${currentLevel().shards}`;
+  if (currentLevel().isBoss) {
+    const boss = enemies.find((enemy) => enemy.isBoss);
+    shardText.textContent = boss ? `BOSS ${Math.max(0, Math.ceil(boss.hp))}` : 'BOSS READY';
+  } else {
+    shardText.textContent = `${collected} / ${currentLevel().shards}`;
+  }
   coinText.textContent = `🪙 ${coins}`;
 
   if (stormPhase < 0.35) {
@@ -372,6 +384,24 @@ function spawnEnemy() {
     maxHp: hp,
     hitFlash: 0,
   });
+}
+
+function spawnBoss() {
+  const level = currentLevel();
+  const hp = level.enemyHp;
+
+  enemies.push({
+    x: WORLD.width / 2,
+    y: 110,
+    radius: 52,
+    speed: level.enemySpeed,
+    hp,
+    maxHp: hp,
+    hitFlash: 0,
+    isBoss: true,
+  });
+  bossSpawned = true;
+  createBurst(WORLD.width / 2, 110, '#9fe7ff', 32);
 }
 
 function fireProjectile() {
@@ -551,7 +581,9 @@ function update(dt) {
   droneProjectiles = droneProjectiles.filter((p) => !p.dead);
 
   spawnTimer -= dt;
-  if (spawnTimer <= 0) {
+  if (level.isBoss && !bossSpawned) {
+    spawnBoss();
+  } else if (!level.isBoss && spawnTimer <= 0) {
     spawnEnemy();
     spawnTimer = Math.max(level.spawnMin, level.spawnBase - stormPhase * (level.spawnBase - level.spawnMin));
   }
@@ -560,7 +592,9 @@ function update(dt) {
     const dx = player.x - enemy.x;
     const dy = player.y - enemy.y;
     const dist = Math.hypot(dx, dy) || 1;
-    const speedBoost = 1 + stormPhase * 0.6;
+    const speedBoost = enemy.isBoss
+      ? 1 + (enemy.hp < enemy.maxHp * 0.5 ? 0.7 : 0.15)
+      : 1 + stormPhase * 0.6;
 
     enemy.x += (dx / dist) * enemy.speed * speedBoost * dt;
     enemy.y += (dy / dist) * enemy.speed * speedBoost * dt;
@@ -568,7 +602,8 @@ function update(dt) {
 
     const attackRange = enemy.radius + player.radius + 6;
     if (dist < attackRange) {
-      damagePlayer(16 * dt * (1 + stormPhase * 1.1));
+      const contactDamage = enemy.isBoss ? 30 : 16;
+      damagePlayer(contactDamage * dt * (1 + stormPhase * 1.1));
       createBurst(player.x, player.y, '#ff6b7d', 5);
     }
   }
@@ -611,7 +646,8 @@ function update(dt) {
   }
 
   const collectedTotal = shards.filter((s) => s.collected).length;
-  if (collectedTotal >= level.shards) {
+  const bossDefeated = level.isBoss && bossSpawned && enemies.length === 0;
+  if ((!level.isBoss && collectedTotal >= level.shards) || bossDefeated) {
     handleLevelCleared();
   }
 
@@ -656,18 +692,101 @@ function drawBackground() {
     ctx.fillRect(x, y, 2, 2);
   }
 
-  for (let i = 0; i < 8; i += 1) {
-    const hillY = WORLD.height - 80 - i * 16;
-    ctx.fillStyle = `rgba(${br + 15}, ${bg + 15}, ${bb + 25}, ${0.5 + i * 0.06})`;
-    ctx.beginPath();
-    ctx.moveTo(0, WORLD.height);
-    for (let x = 0; x <= WORLD.width; x += 100) {
-      ctx.lineTo(x, hillY + Math.sin(x * 0.03 + i) * 25);
+  ctx.save();
+  ctx.globalAlpha = 0.95;
+
+  if (levelIndex === 0) {
+    ctx.fillStyle = '#172d42';
+    ctx.fillRect(0, 410, WORLD.width, 150);
+    ctx.fillStyle = '#23506a';
+    ctx.fillRect(0, 420, WORLD.width, 140);
+    ctx.strokeStyle = '#8a5b3c';
+    ctx.lineWidth = 12;
+    for (let x = -40; x < WORLD.width; x += 70) ctx.strokeRect(x, 365 + (x % 3) * 8, 58, 190);
+    ctx.fillStyle = '#70452f';
+    ctx.fillRect(80, 220, 18, 210);
+    ctx.fillRect(260, 180, 18, 250);
+    ctx.fillRect(730, 205, 18, 225);
+    ctx.fillStyle = '#c47b3d';
+    ctx.beginPath(); ctx.moveTo(260, 185); ctx.lineTo(330, 255); ctx.lineTo(260, 255); ctx.fill();
+    ctx.fillStyle = '#d8a85d';
+    ctx.fillRect(42, 390, 150, 16);
+    ctx.fillRect(650, 375, 220, 16);
+  } else if (levelIndex === 1) {
+    ctx.fillStyle = '#447844';
+    ctx.fillRect(0, 285, WORLD.width, 275);
+    ctx.fillStyle = '#b18a55';
+    ctx.beginPath(); ctx.moveTo(400, 560); ctx.lineTo(525, 560); ctx.lineTo(505, 330); ctx.lineTo(465, 275); ctx.lineTo(425, 330); ctx.fill();
+    ctx.strokeStyle = '#d6b873';
+    ctx.lineWidth = 4;
+    for (let x = 35; x < WORLD.width; x += 95) {
+      ctx.beginPath(); ctx.moveTo(x, 430 + (x % 4) * 12); ctx.lineTo(x + 12, 414 + (x % 3) * 10); ctx.stroke();
     }
-    ctx.lineTo(WORLD.width, WORLD.height);
-    ctx.closePath();
-    ctx.fill();
+  } else if (levelIndex === 2) {
+    ctx.fillStyle = '#315b43';
+    ctx.fillRect(0, 320, WORLD.width, 240);
+    ctx.fillStyle = '#b88b62';
+    ctx.beginPath(); ctx.moveTo(0, 430); ctx.lineTo(WORLD.width, 395); ctx.lineTo(WORLD.width, 560); ctx.lineTo(0, 560); ctx.fill();
+    for (let x = 70; x < WORLD.width; x += 180) {
+      ctx.fillStyle = '#8b5548'; ctx.fillRect(x, 280 - (x % 3) * 18, 105, 100);
+      ctx.fillStyle = '#d7b56b'; ctx.fillRect(x + 14, 300 - (x % 3) * 18, 25, 25);
+      ctx.fillRect(x + 66, 300 - (x % 3) * 18, 25, 25);
+      ctx.fillStyle = '#613d36'; ctx.beginPath(); ctx.moveTo(x - 12, 280 - (x % 3) * 18); ctx.lineTo(x + 52, 230 - (x % 3) * 18); ctx.lineTo(x + 118, 280 - (x % 3) * 18); ctx.fill();
+    }
+  } else if (levelIndex === 3) {
+    ctx.fillStyle = '#173d2c'; ctx.fillRect(0, 300, WORLD.width, 260);
+    ctx.fillStyle = '#a67b4c';
+    ctx.beginPath(); ctx.moveTo(420, 560); ctx.lineTo(540, 560); ctx.lineTo(510, 330); ctx.lineTo(470, 285); ctx.lineTo(430, 330); ctx.fill();
+    for (let x = 35; x < WORLD.width; x += 105) {
+      ctx.fillStyle = '#214f37'; ctx.fillRect(x, 190 + (x % 4) * 20, 24, 210);
+      ctx.fillStyle = '#2f7043'; ctx.beginPath(); ctx.arc(x + 12, 185 + (x % 4) * 20, 58, 0, Math.PI * 2); ctx.fill();
+      ctx.fillStyle = '#3d8a50'; ctx.beginPath(); ctx.arc(x - 25, 235 + (x % 3) * 14, 38, 0, Math.PI * 2); ctx.fill();
+    }
+  } else if (levelIndex === 4 || levelIndex === 5 || levelIndex === 6) {
+    ctx.fillStyle = levelIndex === 5 ? '#151827' : '#302026'; ctx.fillRect(0, 260, WORLD.width, 300);
+    ctx.fillStyle = '#11131c';
+    ctx.beginPath(); ctx.moveTo(0, 560); ctx.lineTo(0, 270); ctx.quadraticCurveTo(180, 120, 330, 285); ctx.quadraticCurveTo(480, 385, 630, 260); ctx.quadraticCurveTo(800, 100, WORLD.width, 270); ctx.lineTo(WORLD.width, 560); ctx.fill();
+    ctx.fillStyle = '#704b43';
+    ctx.beginPath(); ctx.moveTo(340, 560); ctx.lineTo(620, 560); ctx.lineTo(560, 365); ctx.quadraticCurveTo(480, 290, 400, 365); ctx.fill();
+    if (levelIndex === 4) {
+      ctx.fillStyle = '#d67c45'; ctx.beginPath(); ctx.arc(480, 380, 58, Math.PI, 0); ctx.fill();
+    }
+    if (levelIndex === 5) {
+      ctx.fillStyle = '#cbd7e2';
+      for (let x = 90; x < WORLD.width; x += 130) { ctx.beginPath(); ctx.arc(x, 330 + (x % 4) * 20, 10, 0, Math.PI * 2); ctx.fill(); }
+      ctx.fillStyle = '#252b42'; ctx.beginPath(); ctx.moveTo(130, 60); ctx.quadraticCurveTo(155, 95, 180, 60); ctx.quadraticCurveTo(205, 95, 230, 60); ctx.lineTo(210, 155); ctx.lineTo(150, 155); ctx.fill();
+    }
+  } else if (levelIndex === 7 || levelIndex === 8) {
+    ctx.fillStyle = levelIndex === 8 ? '#d7e5ef' : '#5d6b70'; ctx.fillRect(0, 300, WORLD.width, 260);
+    ctx.fillStyle = '#4b4a49';
+    ctx.beginPath(); ctx.moveTo(0, 560); ctx.lineTo(0, 245); ctx.lineTo(250, 130); ctx.lineTo(450, 280); ctx.lineTo(700, 95); ctx.lineTo(WORLD.width, 240); ctx.lineTo(WORLD.width, 560); ctx.fill();
+    ctx.fillStyle = levelIndex === 8 ? '#f8fbff' : '#8d9a98';
+    ctx.beginPath(); ctx.moveTo(0, 560); ctx.lineTo(WORLD.width, 560); ctx.lineTo(640, 360); ctx.lineTo(535, 320); ctx.lineTo(355, 430); ctx.lineTo(0, 470); ctx.fill();
+    ctx.strokeStyle = '#b8a16d'; ctx.lineWidth = 5;
+    ctx.beginPath(); ctx.moveTo(0, 470); ctx.lineTo(355, 430); ctx.lineTo(535, 320); ctx.lineTo(640, 360); ctx.stroke();
+    if (levelIndex === 8) {
+      ctx.fillStyle = '#ffffff';
+      for (let i = 0; i < 35; i += 1) ctx.fillRect((i * 83) % WORLD.width, 280 + ((i * 47) % 230), 3, 3);
+    }
+  } else if (levelIndex === 9) {
+    ctx.fillStyle = '#451b18'; ctx.fillRect(0, 270, WORLD.width, 290);
+    ctx.fillStyle = '#241317';
+    ctx.beginPath(); ctx.moveTo(0, 560); ctx.lineTo(0, 240); ctx.lineTo(170, 160); ctx.lineTo(330, 270); ctx.lineTo(500, 110); ctx.lineTo(690, 250); ctx.lineTo(860, 120); ctx.lineTo(WORLD.width, 210); ctx.lineTo(WORLD.width, 560); ctx.fill();
+    ctx.fillStyle = '#ff6b32';
+    ctx.beginPath(); ctx.moveTo(0, 560); ctx.lineTo(WORLD.width, 560); ctx.lineTo(760, 450); ctx.lineTo(650, 410); ctx.lineTo(380, 470); ctx.lineTo(180, 430); ctx.fill();
+    ctx.fillStyle = '#ffbd45'; ctx.beginPath(); ctx.arc(480, 190, 55 + stormPhase * 8, 0, Math.PI * 2); ctx.fill();
+  } else {
+    ctx.fillStyle = '#35151a'; ctx.fillRect(0, 250, WORLD.width, 310);
+    ctx.fillStyle = '#0f111b'; ctx.fillRect(75, 105, WORLD.width - 150, 380);
+    ctx.strokeStyle = '#8e3b2d'; ctx.lineWidth = 18; ctx.strokeRect(75, 105, WORLD.width - 150, 380);
+    ctx.fillStyle = '#ff5a32';
+    ctx.beginPath(); ctx.moveTo(0, 560); ctx.lineTo(WORLD.width, 560); ctx.lineTo(770, 480); ctx.lineTo(650, 445); ctx.lineTo(430, 490); ctx.lineTo(210, 445); ctx.fill();
+    ctx.strokeStyle = '#ffca62'; ctx.lineWidth = 4;
+    ctx.beginPath(); ctx.arc(WORLD.width / 2, 300, 120 + Math.sin(Date.now() * 0.004) * 8, 0, Math.PI * 2); ctx.stroke();
+    ctx.fillStyle = '#ffdc7a'; ctx.beginPath(); ctx.arc(WORLD.width / 2, 300, 20, 0, Math.PI * 2); ctx.fill();
   }
+
+  ctx.restore();
 }
 
 function drawPlayer() {
@@ -721,15 +840,33 @@ function drawDrones() {
 function drawEnemy(enemy) {
   ctx.save();
   ctx.translate(enemy.x, enemy.y);
-  ctx.fillStyle = enemy.hitFlash > 0 ? '#ffd1a7' : '#ff7a59';
+  if (enemy.isBoss) {
+    const pulse = 1 + Math.sin(Date.now() * 0.005) * 0.08;
+    ctx.scale(pulse, pulse);
+    ctx.strokeStyle = enemy.hp < enemy.maxHp * 0.5 ? '#ff6b7d' : '#9fe7ff';
+    ctx.lineWidth = 5;
+    ctx.beginPath();
+    ctx.arc(0, 0, enemy.radius + 12, 0, Math.PI * 2);
+    ctx.stroke();
+  }
+  ctx.fillStyle = enemy.hitFlash > 0 ? '#fff1c7' : enemy.isBoss ? '#7b5cff' : '#ff7a59';
   ctx.beginPath();
-  ctx.arc(0, 0, enemy.radius, 0, Math.PI * 2);
+  ctx.arc(0, 0, enemy.radius, enemy.isBoss ? 0.2 : 0, Math.PI * 2);
   ctx.fill();
 
+  if (enemy.isBoss) {
+    ctx.fillStyle = '#ffdc7a';
+    ctx.beginPath();
+    ctx.arc(-16, -8, 7, 0, Math.PI * 2);
+    ctx.arc(16, -8, 7, 0, Math.PI * 2);
+    ctx.fill();
+  }
+
   ctx.fillStyle = 'rgba(20, 20, 35, 0.75)';
-  ctx.fillRect(-enemy.radius, -enemy.radius - 12, enemy.radius * 2, 6);
-  ctx.fillStyle = '#9be7ff';
-  ctx.fillRect(-enemy.radius, -enemy.radius - 12, (enemy.hp / enemy.maxHp) * enemy.radius * 2, 6);
+  const barWidth = enemy.isBoss ? enemy.radius * 3 : enemy.radius * 2;
+  ctx.fillRect(-barWidth / 2, -enemy.radius - 18, barWidth, enemy.isBoss ? 9 : 6);
+  ctx.fillStyle = enemy.isBoss ? '#ffdc7a' : '#9be7ff';
+  ctx.fillRect(-barWidth / 2, -enemy.radius - 18, (enemy.hp / enemy.maxHp) * barWidth, enemy.isBoss ? 9 : 6);
   ctx.restore();
 }
 
@@ -810,8 +947,8 @@ function setGameState(nextState) {
 
   if (nextState === 'victory') {
     showOverlay(
-      'The Ashen Regent Falls',
-      'All ten sky fragments are restored. The storm breaks, the kingdom breathes again, and Aetherfall is saved.',
+      'The Stormheart Falls',
+      'The Stormheart is broken. The storm breaks, the kingdom breathes again, and Aetherfall is saved.',
       'Play Again'
     );
   }
@@ -948,7 +1085,7 @@ document.addEventListener('webkitfullscreenchange', () => {
 resetRun();
 showOverlay(
   'Skywarden Awakens',
-  'Survive the storm, gather the Echo Shards, and rebuild the broken sky across 10 levels. Kill enemies for coins and spend them on upgrades in the panel on the right.',
+  'Survive the storm, gather the Echo Shards, and face the Stormheart in a final boss battle on Level 11. Kill enemies for coins and spend them on upgrades in the panel on the right.',
   'Begin the Descent'
 );
 refreshPauseUi();
