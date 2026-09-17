@@ -84,7 +84,7 @@ const LEVELS = [
   },
   {
     name: 'Level 11: The Lava Trial Chamber', shards: 0, spawnBase: Infinity, spawnMin: Infinity,
-    enemySpeed: 52, enemyHp: 240, stormSpeed: 0.28, isBoss: true,
+    enemySpeed: 52, enemyHp: 4000, stormSpeed: 0.28, isBoss: true,
     skyTop: [18, 55, 90], skyBottom: [3, 5, 18], accent: '#9fe7ff',
   },
 ];
@@ -135,6 +135,7 @@ let enemies = [];
 let shards = [];
 let player = null;
 let bossSpawned = false;
+let bossSummonTimer = 0;
 
 const upgrades = {
   health: 0,
@@ -220,6 +221,7 @@ function startLevel(index, preserveHpRatio) {
   droneProjectiles = [];
   enemies = [];
   bossSpawned = false;
+  bossSummonTimer = 0;
   shards = buildShardsForLevel();
   player = initPlayer(preserveHpRatio);
 
@@ -401,7 +403,43 @@ function spawnBoss() {
     isBoss: true,
   });
   bossSpawned = true;
+  bossSummonTimer = 4.5;
   createBurst(WORLD.width / 2, 110, '#9fe7ff', 32);
+}
+
+function spawnBossMinion() {
+  const level = currentLevel();
+  const side = Math.floor(Math.random() * 4);
+  const padding = 42;
+  let x = 0;
+  let y = 0;
+
+  if (side === 0) {
+    x = Math.random() * WORLD.width;
+    y = -padding;
+  } else if (side === 1) {
+    x = WORLD.width + padding;
+    y = Math.random() * WORLD.height;
+  } else if (side === 2) {
+    x = Math.random() * WORLD.width;
+    y = WORLD.height + padding;
+  } else {
+    x = -padding;
+    y = Math.random() * WORLD.height;
+  }
+
+  const hp = 8 + Math.random() * 4;
+  enemies.push({
+    x,
+    y,
+    radius: 13 + Math.random() * 5,
+    speed: level.enemySpeed * (1.2 + Math.random() * 0.25),
+    hp,
+    maxHp: hp,
+    hitFlash: 0,
+    isMinion: true,
+  });
+  createBurst(x, y, '#c58cff', 10);
 }
 
 function fireProjectile() {
@@ -586,6 +624,16 @@ function update(dt) {
   } else if (!level.isBoss && spawnTimer <= 0) {
     spawnEnemy();
     spawnTimer = Math.max(level.spawnMin, level.spawnBase - stormPhase * (level.spawnBase - level.spawnMin));
+  }
+
+  if (level.isBoss && bossSpawned) {
+    bossSummonTimer -= dt;
+    const minionCount = enemies.filter((enemy) => enemy.isMinion).length;
+    if (bossSummonTimer <= 0 && minionCount < 6) {
+      spawnBossMinion();
+      if (minionCount < 3) spawnBossMinion();
+      bossSummonTimer = 5.5;
+    }
   }
 
   for (const enemy of enemies) {
