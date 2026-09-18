@@ -85,7 +85,7 @@ const LEVELS = [
   },
   {
     name: 'Level 11: The Lava Trial Chamber', shards: 0, spawnBase: Infinity, spawnMin: Infinity,
-    enemySpeed: 52, enemyHp: 15000, stormSpeed: 0.28, isBoss: true,
+    enemySpeed: 96, enemyHp: 15000, stormSpeed: 0.28, isBoss: true,
     skyTop: [18, 55, 90], skyBottom: [3, 5, 18], accent: '#9fe7ff',
   },
 ];
@@ -132,7 +132,7 @@ const UPGRADE_DEFS = {
   },
   regenCore: {
     name: 'Nano Regen Core', icon: '💠', maxLevel: 3, baseCost: 130, growth: 1.65, unlockLevelIndex: 7,
-    describe: (lvl) => `Regenerate ${(lvl * 1.5).toFixed(1)} HP per second`,
+    describe: (lvl) => `Regenerate ${(lvl * 5).toFixed(1)} HP per second`,
   },
   kineticBarrier: {
     name: 'Kinetic Barrier', icon: '🌀', maxLevel: 3, baseCost: 145, growth: 1.7, unlockLevelIndex: 7,
@@ -156,10 +156,12 @@ let enemyProjectiles = [];
 let enemies = [];
 let shards = [];
 let turrets = [];
+let landmines = [];
 let player = null;
 let bossSpawned = false;
 let bossSummonTimer = 0;
 let floaterSpawnTimer = Infinity;
+let landmineSpawnTimer = Infinity;
 
 const upgrades = {
   health: 0,
@@ -246,12 +248,14 @@ function startLevel(index, preserveHpRatio) {
   stormPhase = 0;
   spawnTimer = level.spawnBase;
   floaterSpawnTimer = level.floaterInterval || Infinity;
+  landmineSpawnTimer = level.isBoss ? 2 : Infinity;
   particles = [];
   projectiles = [];
   droneProjectiles = [];
   enemyProjectiles = [];
   enemies = [];
   turrets = [];
+  landmines = [];
   bossSpawned = false;
   bossSummonTimer = 0;
   shards = buildShardsForLevel();
@@ -442,15 +446,36 @@ function spawnBoss() {
     maxHp: hp,
     hitFlash: 0,
     isBoss: true,
-    attackTimer: 3,
+    attackTimer: 2.5,
     isWindingUp: false,
     windupTime: 0,
     attackTargetX: WORLD.width / 2,
     attackTargetY: WORLD.height / 2,
+    attackIndex: -1,
+    currentAttack: null,
+    sweepActive: false,
+    sweepRadius: 0,
+    sweepHasHitPlayer: false,
   });
   bossSpawned = true;
   bossSummonTimer = 3.5;
   createBurst(WORLD.width / 2, 110, '#9fe7ff', 32);
+}
+
+function spawnLandmine() {
+  const padding = 60;
+  let x = 0;
+  let y = 0;
+  let attempts = 0;
+
+  do {
+    x = padding + Math.random() * (WORLD.width - padding * 2);
+    y = padding + Math.random() * (WORLD.height - padding * 2);
+    attempts += 1;
+  } while (player && Math.hypot(x - player.x, y - player.y) < 150 && attempts < 10);
+
+  landmines.push({ x, y, radius: 16, armTime: 0.6 });
+  createBurst(x, y, '#ff5a32', 6);
 }
 
 function spawnBossMinion() {
@@ -758,7 +783,7 @@ function update(dt) {
   }
 
   if (upgrades.regenCore > 0) {
-    player.hp = Math.min(player.maxHp, player.hp + upgrades.regenCore * 1.5 * dt);
+    player.hp = Math.min(player.maxHp, player.hp + upgrades.regenCore * 5 * dt);
   }
 
   let moveX = 0;
@@ -806,6 +831,20 @@ function update(dt) {
   const barrierReduction = 1 - Math.min(0.85, upgrades.kineticBarrier * 0.15);
 
   for (const projectile of enemyProjectiles) {
+    if (projectile.isMissile) {
+      const desiredAngle = Math.atan2(player.y - projectile.y, player.x - projectile.x);
+      const currentAngle = Math.atan2(projectile.vy, projectile.vx);
+      let diff = desiredAngle - currentAngle;
+      while (diff > Math.PI) diff -= Math.PI * 2;
+      while (diff < -Math.PI) diff += Math.PI * 2;
+      const maxTurn = projectile.turnRate * dt;
+      const turn = Math.max(-maxTurn, Math.min(maxTurn, diff));
+      const speed = Math.hypot(projectile.vx, projectile.vy);
+      const newAngle = currentAngle + turn;
+      projectile.vx = Math.cos(newAngle) * speed;
+      projectile.vy = Math.sin(newAngle) * speed;
+    }
+
     projectile.x += projectile.vx * dt;
     projectile.y += projectile.vy * dt;
     projectile.life -= dt;
@@ -841,6 +880,29 @@ function update(dt) {
     }
   }
 
+  if (level.isBoss) {
+    landmineSpawnTimer -= dt;
+    if (landmineSpawnTimer <= 0 && landmines.length < 6) {
+      spawnLandmine();
+      landmineSpawnTimer = 3;
+    }
+  }
+
+  for (const mine of landmines) {
+    mine.armTime = Math.max(0, mine.armTime - dt);
+  }
+  landmines = landmines.filter((mine) => {
+    if (mine.armTime > 0) return true;
+    const dx = player.x - mine.x;
+    const dy = player.y - mine.y;
+    if (Math.hypot(dx, dy) < mine.radius + player.radius) {
+      damagePlayer(35 * barrierReduction);
+      createBurst(mine.x, mine.y, '#ff5a32', 20);
+      return false;
+    }
+    return true;
+  });
+
   if (level.isBoss && bossSpawned) {
     const boss = enemies.find((enemy) => enemy.isBoss);
 
@@ -855,33 +917,74 @@ function update(dt) {
     }
 
     if (boss) {
+      if (boss.sweepActive) {
+        boss.sweepRadius += 620 * dt;
+        const distToPlayer = Math.hypot(player.x - boss.x, player.y - boss.y);
+        if (!boss.sweepHasHitPlayer && Math.abs(distToPlayer - boss.sweepRadius) < 26) {
+          damagePlayer(45 * barrierReduction);
+          createBurst(player.x, player.y, '#ff5a32', 14);
+          boss.sweepHasHitPlayer = true;
+        }
+        if (boss.sweepRadius > 360) {
+          boss.sweepActive = false;
+        }
+      }
+
       if (boss.isWindingUp) {
         boss.windupTime -= dt;
         if (boss.windupTime <= 0) {
-          const dx = boss.attackTargetX - boss.x;
-          const dy = boss.attackTargetY - boss.y;
-          const len = Math.hypot(dx, dy) || 1;
-
-          enemyProjectiles.push({
-            x: boss.x,
-            y: boss.y,
-            vx: (dx / len) * 140,
-            vy: (dy / len) * 140,
-            radius: 26,
-            life: 5,
-            damage: 100,
-            isBossBolt: true,
-          });
-          createBurst(boss.x, boss.y, '#ff5a32', 24);
           boss.isWindingUp = false;
-          boss.attackTimer = 6.5;
+
+          if (boss.currentAttack === 'bolt') {
+            const dx = boss.attackTargetX - boss.x;
+            const dy = boss.attackTargetY - boss.y;
+            const len = Math.hypot(dx, dy) || 1;
+
+            enemyProjectiles.push({
+              x: boss.x,
+              y: boss.y,
+              vx: (dx / len) * 160,
+              vy: (dy / len) * 160,
+              radius: 26,
+              life: 5,
+              damage: 100,
+              isBossBolt: true,
+            });
+            createBurst(boss.x, boss.y, '#ff5a32', 24);
+          } else if (boss.currentAttack === 'missiles') {
+            const missileCount = 4;
+            for (let i = 0; i < missileCount; i += 1) {
+              const angle = (Math.PI * 2 * i) / missileCount + Math.random() * 0.4;
+              enemyProjectiles.push({
+                x: boss.x,
+                y: boss.y,
+                vx: Math.cos(angle) * 150,
+                vy: Math.sin(angle) * 150,
+                radius: 10,
+                life: 4,
+                damage: 25,
+                isMissile: true,
+                turnRate: 2.6,
+              });
+            }
+            createBurst(boss.x, boss.y, '#c58cff', 20);
+          } else if (boss.currentAttack === 'sweep') {
+            boss.sweepActive = true;
+            boss.sweepRadius = 40;
+            boss.sweepHasHitPlayer = false;
+          }
+
+          boss.attackTimer = 3.8;
         }
       } else {
         boss.attackTimer -= dt;
         if (boss.attackTimer <= 0) {
-          // Telegraphs a slow, dodgeable strike aimed at the player's position when the windup starts.
+          const patterns = ['bolt', 'missiles', 'sweep'];
+          boss.attackIndex = (boss.attackIndex + 1) % patterns.length;
+          boss.currentAttack = patterns[boss.attackIndex];
+          // Telegraphs the next strike so the player has a window to reposition or dodge.
           boss.isWindingUp = true;
-          boss.windupTime = 0.9;
+          boss.windupTime = boss.currentAttack === 'sweep' ? 1.1 : 0.75;
           boss.attackTargetX = player.x;
           boss.attackTargetY = player.y;
           createBurst(boss.x, boss.y, '#ffdc7a', 18);
@@ -1238,21 +1341,65 @@ function drawEnemy(enemy) {
   if (enemy.isBoss && enemy.isWindingUp) {
     const pulse = 0.6 + Math.sin(Date.now() * 0.02) * 0.4;
     ctx.save();
-    ctx.strokeStyle = `rgba(255, 90, 50, ${pulse})`;
-    ctx.lineWidth = 3;
-    ctx.setLineDash([10, 8]);
-    ctx.beginPath();
-    ctx.moveTo(enemy.x, enemy.y);
-    ctx.lineTo(enemy.attackTargetX, enemy.attackTargetY);
-    ctx.stroke();
-    ctx.setLineDash([]);
 
-    ctx.lineWidth = 4;
+    if (enemy.currentAttack === 'sweep') {
+      ctx.strokeStyle = `rgba(255, 90, 50, ${pulse})`;
+      ctx.lineWidth = 4;
+      ctx.setLineDash([14, 10]);
+      ctx.beginPath();
+      ctx.arc(enemy.x, enemy.y, 360, 0, Math.PI * 2);
+      ctx.stroke();
+      ctx.setLineDash([]);
+    } else if (enemy.currentAttack === 'missiles') {
+      ctx.strokeStyle = `rgba(197, 140, 255, ${pulse})`;
+      ctx.lineWidth = 4;
+      ctx.beginPath();
+      ctx.arc(enemy.x, enemy.y, enemy.radius + 26, 0, Math.PI * 2);
+      ctx.stroke();
+    } else {
+      ctx.strokeStyle = `rgba(255, 90, 50, ${pulse})`;
+      ctx.lineWidth = 3;
+      ctx.setLineDash([10, 8]);
+      ctx.beginPath();
+      ctx.moveTo(enemy.x, enemy.y);
+      ctx.lineTo(enemy.attackTargetX, enemy.attackTargetY);
+      ctx.stroke();
+      ctx.setLineDash([]);
+
+      ctx.lineWidth = 4;
+      ctx.beginPath();
+      ctx.arc(enemy.attackTargetX, enemy.attackTargetY, 30, 0, Math.PI * 2);
+      ctx.stroke();
+    }
+
+    ctx.restore();
+  }
+
+  if (enemy.isBoss && enemy.sweepActive) {
+    ctx.save();
+    ctx.strokeStyle = 'rgba(255, 90, 50, 0.75)';
+    ctx.lineWidth = 6;
     ctx.beginPath();
-    ctx.arc(enemy.attackTargetX, enemy.attackTargetY, 30, 0, Math.PI * 2);
+    ctx.arc(enemy.x, enemy.y, enemy.sweepRadius, 0, Math.PI * 2);
     ctx.stroke();
     ctx.restore();
   }
+}
+
+function drawLandmine(mine) {
+  const armed = mine.armTime <= 0;
+  ctx.save();
+  ctx.translate(mine.x, mine.y);
+  ctx.fillStyle = '#3a2418';
+  ctx.beginPath();
+  ctx.arc(0, 0, mine.radius, 0, Math.PI * 2);
+  ctx.fill();
+  const blink = armed ? 0.5 + Math.sin(Date.now() * 0.01) * 0.5 : 0.25;
+  ctx.fillStyle = `rgba(255, 70, 40, ${blink})`;
+  ctx.beginPath();
+  ctx.arc(0, 0, mine.radius * 0.45, 0, Math.PI * 2);
+  ctx.fill();
+  ctx.restore();
 }
 
 function drawShard(shard) {
@@ -1291,6 +1438,22 @@ function drawEnemyProjectile(projectile) {
     ctx.strokeStyle = 'rgba(255, 220, 122, 0.85)';
     ctx.lineWidth = 3;
     ctx.stroke();
+    ctx.restore();
+    return;
+  }
+
+  if (projectile.isMissile) {
+    const angle = Math.atan2(projectile.vy, projectile.vx);
+    ctx.save();
+    ctx.translate(projectile.x, projectile.y);
+    ctx.rotate(angle);
+    ctx.fillStyle = '#c58cff';
+    ctx.beginPath();
+    ctx.moveTo(projectile.radius, 0);
+    ctx.lineTo(-projectile.radius, projectile.radius * 0.6);
+    ctx.lineTo(-projectile.radius, -projectile.radius * 0.6);
+    ctx.closePath();
+    ctx.fill();
     ctx.restore();
     return;
   }
@@ -1348,6 +1511,7 @@ function render() {
     if (!shard.collected) drawShard(shard);
   }
 
+  for (const mine of landmines) drawLandmine(mine);
   for (const turret of turrets) drawTurret(turret);
   for (const projectile of projectiles) drawProjectile(projectile);
   for (const projectile of droneProjectiles) drawProjectile(projectile);
