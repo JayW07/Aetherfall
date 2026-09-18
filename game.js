@@ -9,6 +9,7 @@ const levelNameEl = document.getElementById('levelName');
 const overlay = document.getElementById('overlay');
 const overlayTitle = document.getElementById('overlayTitle');
 const overlayText = document.getElementById('overlayText');
+const overlayInfo = document.getElementById('overlayInfo');
 const startButton = document.getElementById('startButton');
 const upgradesList = document.getElementById('upgradesList');
 const fullscreenButton = document.getElementById('fullscreenButton');
@@ -69,22 +70,22 @@ const LEVELS = [
   },
   {
     name: 'Level 8: Mountainclimb Path', shards: 11, spawnBase: 0.63, spawnMin: 0.33,
-    enemySpeed: 110, enemyHp: 7.3, stormSpeed: 0.16,
+    enemySpeed: 110, enemyHp: 7.3, stormSpeed: 0.16, floaterInterval: 5,
     skyTop: [60, 50, 90], skyBottom: [5, 5, 14], accent: '#ff8fd0',
   },
   {
     name: 'Level 9: The Snowline Path', shards: 12, spawnBase: 0.5, spawnMin: 0.26,
-    enemySpeed: 126, enemyHp: 8.7, stormSpeed: 0.185,
+    enemySpeed: 126, enemyHp: 8.7, stormSpeed: 0.185, floaterInterval: 4.5,
     skyTop: [140, 40, 40], skyBottom: [20, 4, 6], accent: '#ff5c5c',
   },
   {
     name: 'Level 10: Volcano Summit', shards: 13, spawnBase: 0.38, spawnMin: 0.2,
-    enemySpeed: 144, enemyHp: 10.5, stormSpeed: 0.22,
+    enemySpeed: 144, enemyHp: 10.5, stormSpeed: 0.22, floaterInterval: 3.5,
     skyTop: [40, 10, 10], skyBottom: [4, 2, 6], accent: '#ffdc7a',
   },
   {
     name: 'Level 11: The Lava Trial Chamber', shards: 0, spawnBase: Infinity, spawnMin: Infinity,
-    enemySpeed: 52, enemyHp: 4000, stormSpeed: 0.28, isBoss: true,
+    enemySpeed: 52, enemyHp: 15000, stormSpeed: 0.28, isBoss: true,
     skyTop: [18, 55, 90], skyBottom: [3, 5, 18], accent: '#9fe7ff',
   },
 ];
@@ -117,6 +118,26 @@ const UPGRADE_DEFS = {
     name: 'Storm Ward', icon: '🛡', maxLevel: 4, baseCost: 110, growth: 1.6,
     describe: (lvl) => `${lvl} shield charge${lvl === 1 ? '' : 's'} that block incoming hits`,
   },
+  turret: {
+    name: 'Sentry Turret', icon: '🗼', maxLevel: 3, baseCost: 150, growth: 1.75, unlockLevelIndex: 7,
+    describe: (lvl) => `Deploy up to ${lvl} turret${lvl === 1 ? '' : 's'} (50 HP each, press T to place)`,
+  },
+  droneOverdrive: {
+    name: 'Drone Overdrive', icon: '🛰', maxLevel: 3, baseCost: 160, growth: 1.75, unlockLevelIndex: 7,
+    describe: (lvl) => `Aether Drones deal +${lvl * 35}% damage and fire ${Math.round((1 - Math.pow(0.75, lvl)) * 100)}% faster`,
+  },
+  piercing: {
+    name: 'Piercing Rounds', icon: '➶', maxLevel: 3, baseCost: 140, growth: 1.7, unlockLevelIndex: 7,
+    describe: (lvl) => `Main bolts pierce through ${lvl} extra ${lvl === 1 ? 'enemy' : 'enemies'}`,
+  },
+  regenCore: {
+    name: 'Nano Regen Core', icon: '💠', maxLevel: 3, baseCost: 130, growth: 1.65, unlockLevelIndex: 7,
+    describe: (lvl) => `Regenerate ${(lvl * 1.5).toFixed(1)} HP per second`,
+  },
+  kineticBarrier: {
+    name: 'Kinetic Barrier', icon: '🌀', maxLevel: 3, baseCost: 145, growth: 1.7, unlockLevelIndex: 7,
+    describe: (lvl) => `${lvl * 15}% less contact damage taken`,
+  },
 };
 
 const keys = {};
@@ -131,11 +152,14 @@ let spawnTimer = 0;
 let particles = [];
 let projectiles = [];
 let droneProjectiles = [];
+let enemyProjectiles = [];
 let enemies = [];
 let shards = [];
+let turrets = [];
 let player = null;
 let bossSpawned = false;
 let bossSummonTimer = 0;
+let floaterSpawnTimer = Infinity;
 
 const upgrades = {
   health: 0,
@@ -144,6 +168,11 @@ const upgrades = {
   doubleCannon: 0,
   drones: 0,
   forcefield: 0,
+  turret: 0,
+  droneOverdrive: 0,
+  piercing: 0,
+  regenCore: 0,
+  kineticBarrier: 0,
 };
 
 function currentLevel() {
@@ -216,10 +245,13 @@ function startLevel(index, preserveHpRatio) {
 
   stormPhase = 0;
   spawnTimer = level.spawnBase;
+  floaterSpawnTimer = level.floaterInterval || Infinity;
   particles = [];
   projectiles = [];
   droneProjectiles = [];
+  enemyProjectiles = [];
   enemies = [];
+  turrets = [];
   bossSpawned = false;
   bossSummonTimer = 0;
   shards = buildShardsForLevel();
@@ -238,6 +270,11 @@ function resetRun() {
   upgrades.doubleCannon = 0;
   upgrades.drones = 0;
   upgrades.forcefield = 0;
+  upgrades.turret = 0;
+  upgrades.droneOverdrive = 0;
+  upgrades.piercing = 0;
+  upgrades.regenCore = 0;
+  upgrades.kineticBarrier = 0;
   startLevel(0, null);
 }
 
@@ -280,10 +317,11 @@ function renderUpgradePanel() {
     const def = UPGRADE_DEFS[key];
     const lvl = upgrades[key];
     const maxed = lvl >= def.maxLevel;
-    const cost = maxed ? null : upgradeCost(key);
+    const locked = def.unlockLevelIndex !== undefined && levelIndex < def.unlockLevelIndex;
+    const cost = maxed || locked ? null : upgradeCost(key);
 
     const card = document.createElement('div');
-    card.className = `upgrade-card${maxed ? ' maxed' : ''}`;
+    card.className = `upgrade-card${maxed ? ' maxed' : ''}${locked ? ' locked' : ''}`;
 
     const head = document.createElement('div');
     head.className = 'upgrade-head';
@@ -291,12 +329,14 @@ function renderUpgradePanel() {
 
     const desc = document.createElement('p');
     desc.className = 'upgrade-desc';
-    desc.textContent = lvl > 0 ? def.describe(lvl) : 'Not yet purchased';
+    desc.textContent = locked
+      ? `🔒 Unlocks at ${LEVELS[def.unlockLevelIndex].name}`
+      : lvl > 0 ? def.describe(lvl) : 'Not yet purchased';
 
     const button = document.createElement('button');
     button.type = 'button';
-    button.textContent = maxed ? 'Maxed Out' : `Buy — 🪙 ${cost}`;
-    button.disabled = maxed || coins < cost;
+    button.textContent = locked ? 'Locked' : maxed ? 'Maxed Out' : `Buy — 🪙 ${cost}`;
+    button.disabled = locked || maxed || coins < cost;
     button.addEventListener('click', () => buyUpgrade(key));
 
     card.appendChild(head);
@@ -304,7 +344,7 @@ function renderUpgradePanel() {
     card.appendChild(button);
     upgradesList.appendChild(card);
 
-    upgradeCardRefs[key] = { button, maxed, cost };
+    upgradeCardRefs[key] = { button, maxed: maxed || locked, cost };
   });
 }
 
@@ -343,10 +383,11 @@ function buyUpgrade(key) {
   renderUpgradePanel();
 }
 
-function showOverlay(title, text, buttonLabel) {
+function showOverlay(title, text, buttonLabel, showInfo = false) {
   overlayTitle.textContent = title;
   overlayText.textContent = text;
   startButton.textContent = buttonLabel;
+  overlayInfo.classList.toggle('visible', showInfo);
   overlay.classList.add('visible');
 }
 
@@ -401,9 +442,14 @@ function spawnBoss() {
     maxHp: hp,
     hitFlash: 0,
     isBoss: true,
+    attackTimer: 3,
+    isWindingUp: false,
+    windupTime: 0,
+    attackTargetX: WORLD.width / 2,
+    attackTargetY: WORLD.height / 2,
   });
   bossSpawned = true;
-  bossSummonTimer = 4.5;
+  bossSummonTimer = 3.5;
   createBurst(WORLD.width / 2, 110, '#9fe7ff', 32);
 }
 
@@ -442,6 +488,136 @@ function spawnBossMinion() {
   createBurst(x, y, '#c58cff', 10);
 }
 
+function spawnFloater() {
+  const level = currentLevel();
+  const side = Math.floor(Math.random() * 4);
+  const padding = 40;
+  let x = 0;
+  let y = 0;
+
+  if (side === 0) {
+    x = Math.random() * WORLD.width;
+    y = -padding;
+  } else if (side === 1) {
+    x = WORLD.width + padding;
+    y = Math.random() * WORLD.height;
+  } else if (side === 2) {
+    x = Math.random() * WORLD.width;
+    y = WORLD.height + padding;
+  } else {
+    x = -padding;
+    y = Math.random() * WORLD.height;
+  }
+
+  const hp = level.enemyHp * 2.4;
+
+  enemies.push({
+    x,
+    y,
+    radius: 20,
+    speed: 60 + level.enemySpeed * 0.35,
+    hp,
+    maxHp: hp,
+    hitFlash: 0,
+    isFloater: true,
+    shootCooldown: 1 + Math.random(),
+  });
+  createBurst(x, y, '#ff8f4d', 12);
+}
+
+function spawnBossFloater() {
+  const level = currentLevel();
+  const side = Math.floor(Math.random() * 4);
+  const padding = 40;
+  let x = 0;
+  let y = 0;
+
+  if (side === 0) {
+    x = Math.random() * WORLD.width;
+    y = -padding;
+  } else if (side === 1) {
+    x = WORLD.width + padding;
+    y = Math.random() * WORLD.height;
+  } else if (side === 2) {
+    x = Math.random() * WORLD.width;
+    y = WORLD.height + padding;
+  } else {
+    x = -padding;
+    y = Math.random() * WORLD.height;
+  }
+
+  const hp = 26 + Math.random() * 10;
+
+  enemies.push({
+    x,
+    y,
+    radius: 20,
+    speed: 60 + level.enemySpeed * 0.35,
+    hp,
+    maxHp: hp,
+    hitFlash: 0,
+    isFloater: true,
+    shootCooldown: 1 + Math.random(),
+  });
+  createBurst(x, y, '#ff8f4d', 12);
+}
+
+function placeTurret() {
+  if (gameState !== 'playing') return;
+  const maxTurrets = upgrades.turret;
+  if (maxTurrets <= 0) return;
+  if (turrets.length >= maxTurrets) return;
+
+  turrets.push({
+    x: player.x,
+    y: player.y,
+    radius: 16,
+    hp: 50,
+    maxHp: 50,
+    cooldown: 0,
+  });
+  createBurst(player.x, player.y, '#77d7ff', 14);
+}
+
+function updateTurrets(dt) {
+  const turretRange = 260;
+
+  for (const turret of turrets) {
+    turret.cooldown = Math.max(0, turret.cooldown - dt);
+
+    let nearest = null;
+    let nearestDist = Infinity;
+
+    for (const enemy of enemies) {
+      const dx = enemy.x - turret.x;
+      const dy = enemy.y - turret.y;
+      const dist = Math.hypot(dx, dy);
+      if (dist < nearestDist) {
+        nearestDist = dist;
+        nearest = enemy;
+      }
+    }
+
+    if (nearest && nearestDist < turretRange && turret.cooldown <= 0) {
+      const dx = nearest.x - turret.x;
+      const dy = nearest.y - turret.y;
+      const len = Math.hypot(dx, dy) || 1;
+
+      droneProjectiles.push({
+        x: turret.x,
+        y: turret.y,
+        vx: (dx / len) * 340,
+        vy: (dy / len) * 340,
+        radius: 5,
+        life: 1.3,
+        damage: 3 + upgrades.turret,
+      });
+
+      turret.cooldown = 0.9;
+    }
+  }
+}
+
 function fireProjectile() {
   if (player.cooldown > 0) return;
 
@@ -468,6 +644,7 @@ function fireProjectile() {
       radius: 5,
       life: 1.2,
       damage,
+      pierceRemaining: upgrades.piercing,
     });
   }
 
@@ -477,6 +654,9 @@ function fireProjectile() {
 function updateDrones(dt) {
   const droneCount = upgrades.drones;
   if (droneCount === 0) return;
+
+  const overdriveDamageMult = 1 + upgrades.droneOverdrive * 0.35;
+  const overdriveFireMult = Math.pow(0.75, upgrades.droneOverdrive);
 
   player.droneAngle += dt * 1.4;
 
@@ -518,10 +698,10 @@ function updateDrones(dt) {
         vy: (ey / len) * 380,
         radius: 4,
         life: 1.0,
-        damage: Math.max(1, Math.round(baseDamage() * 0.6)),
+        damage: Math.max(1, Math.round(baseDamage() * 0.6 * overdriveDamageMult)),
       });
 
-      player.droneCooldowns[droneKey] = 0.7;
+      player.droneCooldowns[droneKey] = 0.7 * overdriveFireMult;
     }
 
     player.drones = player.drones || [];
@@ -577,6 +757,10 @@ function update(dt) {
     }
   }
 
+  if (upgrades.regenCore > 0) {
+    player.hp = Math.min(player.maxHp, player.hp + upgrades.regenCore * 1.5 * dt);
+  }
+
   let moveX = 0;
   let moveY = 0;
 
@@ -597,6 +781,7 @@ function update(dt) {
   }
 
   updateDrones(dt);
+  updateTurrets(dt);
 
   for (const projectile of projectiles) {
     projectile.x += projectile.vx * dt;
@@ -618,6 +803,28 @@ function update(dt) {
   }
   droneProjectiles = droneProjectiles.filter((p) => !p.dead);
 
+  const barrierReduction = 1 - Math.min(0.85, upgrades.kineticBarrier * 0.15);
+
+  for (const projectile of enemyProjectiles) {
+    projectile.x += projectile.vx * dt;
+    projectile.y += projectile.vy * dt;
+    projectile.life -= dt;
+    if (projectile.x < -20 || projectile.x > WORLD.width + 20 || projectile.y < -20 || projectile.y > WORLD.height + 20 || projectile.life <= 0) {
+      projectile.dead = true;
+    }
+
+    if (!projectile.dead) {
+      const pdx = projectile.x - player.x;
+      const pdy = projectile.y - player.y;
+      if (Math.hypot(pdx, pdy) <= projectile.radius + player.radius) {
+        damagePlayer(projectile.damage * barrierReduction);
+        createBurst(player.x, player.y, '#ff9d52', 6);
+        projectile.dead = true;
+      }
+    }
+  }
+  enemyProjectiles = enemyProjectiles.filter((p) => !p.dead);
+
   spawnTimer -= dt;
   if (level.isBoss && !bossSpawned) {
     spawnBoss();
@@ -626,13 +833,60 @@ function update(dt) {
     spawnTimer = Math.max(level.spawnMin, level.spawnBase - stormPhase * (level.spawnBase - level.spawnMin));
   }
 
+  if (level.floaterInterval) {
+    floaterSpawnTimer -= dt;
+    if (floaterSpawnTimer <= 0) {
+      spawnFloater();
+      floaterSpawnTimer = level.floaterInterval;
+    }
+  }
+
   if (level.isBoss && bossSpawned) {
+    const boss = enemies.find((enemy) => enemy.isBoss);
+
     bossSummonTimer -= dt;
-    const minionCount = enemies.filter((enemy) => enemy.isMinion).length;
-    if (bossSummonTimer <= 0 && minionCount < 6) {
+    const minionCount = enemies.filter((enemy) => enemy.isMinion || enemy.isFloater).length;
+    if (bossSummonTimer <= 0 && minionCount < 10) {
       spawnBossMinion();
-      if (minionCount < 3) spawnBossMinion();
-      bossSummonTimer = 5.5;
+      spawnBossMinion();
+      if (minionCount < 6) spawnBossMinion();
+      spawnBossFloater();
+      bossSummonTimer = 4;
+    }
+
+    if (boss) {
+      if (boss.isWindingUp) {
+        boss.windupTime -= dt;
+        if (boss.windupTime <= 0) {
+          const dx = boss.attackTargetX - boss.x;
+          const dy = boss.attackTargetY - boss.y;
+          const len = Math.hypot(dx, dy) || 1;
+
+          enemyProjectiles.push({
+            x: boss.x,
+            y: boss.y,
+            vx: (dx / len) * 140,
+            vy: (dy / len) * 140,
+            radius: 26,
+            life: 5,
+            damage: 100,
+            isBossBolt: true,
+          });
+          createBurst(boss.x, boss.y, '#ff5a32', 24);
+          boss.isWindingUp = false;
+          boss.attackTimer = 6.5;
+        }
+      } else {
+        boss.attackTimer -= dt;
+        if (boss.attackTimer <= 0) {
+          // Telegraphs a slow, dodgeable strike aimed at the player's position when the windup starts.
+          boss.isWindingUp = true;
+          boss.windupTime = 0.9;
+          boss.attackTargetX = player.x;
+          boss.attackTargetY = player.y;
+          createBurst(boss.x, boss.y, '#ffdc7a', 18);
+        }
+      }
     }
   }
 
@@ -640,21 +894,67 @@ function update(dt) {
     const dx = player.x - enemy.x;
     const dy = player.y - enemy.y;
     const dist = Math.hypot(dx, dy) || 1;
-    const speedBoost = enemy.isBoss
-      ? 1 + (enemy.hp < enemy.maxHp * 0.5 ? 0.7 : 0.15)
-      : 1 + stormPhase * 0.6;
 
-    enemy.x += (dx / dist) * enemy.speed * speedBoost * dt;
-    enemy.y += (dy / dist) * enemy.speed * speedBoost * dt;
+    if (enemy.isFloater) {
+      const desiredDist = 260;
+      const pull = (dist - desiredDist) / desiredDist;
+      const dirX = dx / dist;
+      const dirY = dy / dist;
+      const perpX = -dirY;
+      const perpY = dirX;
+
+      enemy.x += (dirX * pull * enemy.speed + perpX * enemy.speed * 0.6) * dt;
+      enemy.y += (dirY * pull * enemy.speed + perpY * enemy.speed * 0.6) * dt;
+      enemy.x = Math.max(enemy.radius, Math.min(WORLD.width - enemy.radius, enemy.x));
+      enemy.y = Math.max(enemy.radius, Math.min(WORLD.height - enemy.radius, enemy.y));
+
+      enemy.shootCooldown -= dt;
+      if (enemy.shootCooldown <= 0 && dist < 540) {
+        enemyProjectiles.push({
+          x: enemy.x,
+          y: enemy.y,
+          vx: (dx / dist) * 230,
+          vy: (dy / dist) * 230,
+          radius: 7,
+          life: 2.4,
+          damage: Math.floor(Math.random() * 80) + 1,
+        });
+        enemy.shootCooldown = 1.5 + Math.random() * 0.9;
+      }
+    } else {
+      const speedBoost = enemy.isBoss
+        ? 1 + (enemy.hp < enemy.maxHp * 0.5 ? 0.7 : 0.15)
+        : 1 + stormPhase * 0.6;
+
+      enemy.x += (dx / dist) * enemy.speed * speedBoost * dt;
+      enemy.y += (dy / dist) * enemy.speed * speedBoost * dt;
+    }
+
     enemy.hitFlash = Math.max(0, enemy.hitFlash - dt * 3);
 
+    const contactDamage = enemy.isBoss ? 30 : enemy.isFloater ? 10 : 16;
     const attackRange = enemy.radius + player.radius + 6;
     if (dist < attackRange) {
-      const contactDamage = enemy.isBoss ? 30 : 16;
-      damagePlayer(contactDamage * dt * (1 + stormPhase * 1.1));
+      damagePlayer(contactDamage * dt * (1 + stormPhase * 1.1) * barrierReduction);
       createBurst(player.x, player.y, '#ff6b7d', 5);
     }
+
+    for (const turret of turrets) {
+      const tdx = turret.x - enemy.x;
+      const tdy = turret.y - enemy.y;
+      if (Math.hypot(tdx, tdy) < enemy.radius + turret.radius + 4) {
+        turret.hp -= contactDamage * dt;
+      }
+    }
   }
+
+  turrets = turrets.filter((turret) => {
+    if (turret.hp <= 0) {
+      createBurst(turret.x, turret.y, '#77d7ff', 14);
+      return false;
+    }
+    return true;
+  });
 
   const allShots = [...projectiles, ...droneProjectiles];
   for (const projectile of allShots) {
@@ -664,8 +964,13 @@ function update(dt) {
       if (Math.hypot(dx, dy) <= projectile.radius + enemy.radius) {
         enemy.hp -= projectile.damage;
         enemy.hitFlash = 1;
-        projectile.dead = true;
         createBurst(projectile.x, projectile.y, '#9be7ff', 8);
+
+        if (projectile.pierceRemaining && projectile.pierceRemaining > 0) {
+          projectile.pierceRemaining -= 1;
+        } else {
+          projectile.dead = true;
+        }
 
         if (enemy.hp <= 0 && !enemy.dead) {
           createBurst(enemy.x, enemy.y, '#ffdc7a', 16);
@@ -902,6 +1207,19 @@ function drawEnemy(enemy) {
   ctx.arc(0, 0, enemy.radius, enemy.isBoss ? 0.2 : 0, Math.PI * 2);
   ctx.fill();
 
+  if (enemy.isFloater) {
+    ctx.fillStyle = enemy.hitFlash > 0 ? '#ffe4c7' : '#ff8f4d';
+    ctx.beginPath();
+    ctx.moveTo(0, -enemy.radius);
+    ctx.lineTo(enemy.radius, enemy.radius);
+    ctx.lineTo(-enemy.radius, enemy.radius);
+    ctx.closePath();
+    ctx.fill();
+    ctx.strokeStyle = 'rgba(255, 200, 140, 0.7)';
+    ctx.lineWidth = 2;
+    ctx.stroke();
+  }
+
   if (enemy.isBoss) {
     ctx.fillStyle = '#ffdc7a';
     ctx.beginPath();
@@ -916,6 +1234,25 @@ function drawEnemy(enemy) {
   ctx.fillStyle = enemy.isBoss ? '#ffdc7a' : '#9be7ff';
   ctx.fillRect(-barWidth / 2, -enemy.radius - 18, (enemy.hp / enemy.maxHp) * barWidth, enemy.isBoss ? 9 : 6);
   ctx.restore();
+
+  if (enemy.isBoss && enemy.isWindingUp) {
+    const pulse = 0.6 + Math.sin(Date.now() * 0.02) * 0.4;
+    ctx.save();
+    ctx.strokeStyle = `rgba(255, 90, 50, ${pulse})`;
+    ctx.lineWidth = 3;
+    ctx.setLineDash([10, 8]);
+    ctx.beginPath();
+    ctx.moveTo(enemy.x, enemy.y);
+    ctx.lineTo(enemy.attackTargetX, enemy.attackTargetY);
+    ctx.stroke();
+    ctx.setLineDash([]);
+
+    ctx.lineWidth = 4;
+    ctx.beginPath();
+    ctx.arc(enemy.attackTargetX, enemy.attackTargetY, 30, 0, Math.PI * 2);
+    ctx.stroke();
+    ctx.restore();
+  }
 }
 
 function drawShard(shard) {
@@ -939,6 +1276,49 @@ function drawProjectile(projectile) {
   ctx.beginPath();
   ctx.arc(projectile.x, projectile.y, projectile.radius, 0, Math.PI * 2);
   ctx.fill();
+}
+
+function drawEnemyProjectile(projectile) {
+  if (projectile.isBossBolt) {
+    const pulse = 1 + Math.sin(Date.now() * 0.02) * 0.15;
+    ctx.save();
+    ctx.translate(projectile.x, projectile.y);
+    ctx.scale(pulse, pulse);
+    ctx.fillStyle = '#ff5a32';
+    ctx.beginPath();
+    ctx.arc(0, 0, projectile.radius, 0, Math.PI * 2);
+    ctx.fill();
+    ctx.strokeStyle = 'rgba(255, 220, 122, 0.85)';
+    ctx.lineWidth = 3;
+    ctx.stroke();
+    ctx.restore();
+    return;
+  }
+
+  ctx.fillStyle = '#ff8f4d';
+  ctx.beginPath();
+  ctx.arc(projectile.x, projectile.y, projectile.radius, 0, Math.PI * 2);
+  ctx.fill();
+}
+
+function drawTurret(turret) {
+  ctx.save();
+  ctx.translate(turret.x, turret.y);
+  ctx.fillStyle = '#1c2b44';
+  ctx.beginPath();
+  ctx.arc(0, 0, turret.radius, 0, Math.PI * 2);
+  ctx.fill();
+  ctx.strokeStyle = '#77d7ff';
+  ctx.lineWidth = 3;
+  ctx.stroke();
+  ctx.fillStyle = '#9fe7ff';
+  ctx.fillRect(-4, -turret.radius - 10, 8, 10);
+
+  ctx.fillStyle = 'rgba(20, 20, 35, 0.75)';
+  ctx.fillRect(-turret.radius, -turret.radius - 18, turret.radius * 2, 6);
+  ctx.fillStyle = '#77d7ff';
+  ctx.fillRect(-turret.radius, -turret.radius - 18, (turret.hp / turret.maxHp) * turret.radius * 2, 6);
+  ctx.restore();
 }
 
 function drawParticles() {
@@ -968,8 +1348,10 @@ function render() {
     if (!shard.collected) drawShard(shard);
   }
 
+  for (const turret of turrets) drawTurret(turret);
   for (const projectile of projectiles) drawProjectile(projectile);
   for (const projectile of droneProjectiles) drawProjectile(projectile);
+  for (const projectile of enemyProjectiles) drawEnemyProjectile(projectile);
   for (const enemy of enemies) drawEnemy(enemy);
   drawDrones();
   drawPlayer();
@@ -1006,6 +1388,15 @@ function setGameState(nextState) {
       'The Storm Won',
       `The skywarden fell on ${currentLevel().name}. Rise again and try another descent.`,
       'Retry Run'
+    );
+  }
+
+  if (nextState === 'paused') {
+    showOverlay(
+      'Paused',
+      'Take a breath, review the objective and controls below, then jump back in.',
+      'Resume Descent',
+      true
     );
   }
 
@@ -1065,6 +1456,10 @@ window.addEventListener('keydown', (event) => {
 
   if (key === 'e' && gameState !== 'playing' && gameState !== 'paused') {
     handleOverlayAction();
+  }
+
+  if (key === 't' && gameState === 'playing') {
+    placeTurret();
   }
 
   if ((key === 'p' || key === 'escape') && (gameState === 'playing' || gameState === 'paused')) {
@@ -1134,7 +1529,8 @@ resetRun();
 showOverlay(
   'Skywarden Awakens',
   'Survive the storm, gather the Echo Shards, and face the Stormheart in a final boss battle on Level 11. Kill enemies for coins and spend them on upgrades in the panel on the right.',
-  'Begin the Descent'
+  'Begin the Descent',
+  true
 );
 refreshPauseUi();
 requestAnimationFrame(gameLoop);
